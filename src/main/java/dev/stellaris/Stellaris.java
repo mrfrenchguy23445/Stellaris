@@ -6,7 +6,6 @@ import dev.stellaris.config.Cfg;
 import dev.stellaris.metrics.ServerMetrics;
 import dev.stellaris.module.ModuleRegistry;
 import dev.stellaris.optimizer.OptimizerManager;
-import dev.stellaris.storage.KeyValueStore;
 import dev.stellaris.util.Text;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -18,13 +17,10 @@ public final class Stellaris extends JavaPlugin {
     private ServerMetrics metrics;
     private ModuleRegistry modules;
     private CommandBinder commands;
-    private volatile KeyValueStore storage;
     private volatile boolean debug;
 
     @Override
     public void onLoad() {
-        // Publish the instance as early as possible so that other plugins
-        // loading before us can already resolve Stellaris.get().
         instance = this;
     }
 
@@ -42,12 +38,6 @@ public final class Stellaris extends JavaPlugin {
         // `modules.<id>` is false the supplier is never invoked, so the module
         // class is not even loaded.
         modules.register("optimizer", () -> new OptimizerManager(this));
-        modules.register("economy", () -> new dev.stellaris.economy.EconomyManager(this));
-        modules.register("core", () -> new dev.stellaris.core.CoreManager(this));
-        modules.register("chat", () -> new dev.stellaris.chat.ChatManager(this));
-        modules.register("moderation", () -> new dev.stellaris.moderation.ModerationManager(this));
-        modules.register("hub", () -> new dev.stellaris.hub.HubManager(this));
-        modules.register("holograms", () -> new dev.stellaris.hologram.HologramManager(this));
         modules.register("placeholders", () -> new dev.stellaris.placeholder.PlaceholdersModule(this));
 
         metrics.start();
@@ -65,16 +55,8 @@ public final class Stellaris extends JavaPlugin {
 
     @Override
     public void onDisable() {
-        // Reverse order: modules first (they may still need the storage/metrics
-        // services), then the shared services, then drop the static instance so
-        // the plugin class loader can actually be garbage collected.
         if (modules != null) {
             modules.disableAll();
-        }
-        final KeyValueStore store = this.storage;
-        if (store != null) {
-            store.close();
-            this.storage = null;
         }
         if (metrics != null) {
             metrics.stop();
@@ -129,20 +111,6 @@ public final class Stellaris extends JavaPlugin {
 
     public OptimizerManager optimizer() {
         return modules == null ? null : modules.get("optimizer");
-    }
-
-    public KeyValueStore storage() {
-        KeyValueStore local = this.storage;
-        if (local == null) {
-            synchronized (this) {
-                local = this.storage;
-                if (local == null) {
-                    local = KeyValueStore.open(this, cfg("storage"));
-                    this.storage = local;
-                }
-            }
-        }
-        return local;
     }
 
     public static Stellaris get() {

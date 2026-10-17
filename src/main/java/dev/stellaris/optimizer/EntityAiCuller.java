@@ -2,6 +2,7 @@ package dev.stellaris.optimizer;
 
 import dev.stellaris.Stellaris;
 import dev.stellaris.config.Cfg;
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -29,6 +30,10 @@ final class EntityAiCuller implements OptimizerService {
     private final double enclosedDistance;
     private final int intervalTicks;
     private final ObjectOpenHashSet<Mob> disabled = new ObjectOpenHashSet<>(256);
+
+    // Immutable snapshot of the culled entity ids, read lock-free from the
+    // packet threads (see PacketCuller). Rebuilt once per scan interval.
+    private volatile IntOpenHashSet disabledIds = new IntOpenHashSet();
 
     EntityAiCuller(Stellaris plugin) {
         this.plugin = plugin;
@@ -67,11 +72,25 @@ final class EntityAiCuller implements OptimizerService {
             }
         }
         disabled.clear();
+        disabledIds = new IntOpenHashSet();
     }
 
     @Override
     public void trim() {
         disabled.removeIf(mob -> !mob.isValid() || mob.isDead());
+        disabledIds = snapshotIds();
+    }
+
+    boolean isAiDisabled(int entityId) {
+        return disabledIds.contains(entityId);
+    }
+
+    private IntOpenHashSet snapshotIds() {
+        final IntOpenHashSet ids = new IntOpenHashSet(disabled.size());
+        for (Mob mob : disabled) {
+            ids.add(mob.getEntityId());
+        }
+        return ids;
     }
 
     @Override
@@ -118,6 +137,7 @@ final class EntityAiCuller implements OptimizerService {
                 }
             }
         }
+        disabledIds = snapshotIds();
     }
 
     private boolean shouldIgnore(Mob mob) {

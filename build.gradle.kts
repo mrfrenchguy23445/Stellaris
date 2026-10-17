@@ -1,12 +1,12 @@
 /*
- * Stellaris - all-in-one performance & utility suite for Paper / Purpur / Folia.
+ * Stellaris - lightweight performance suite for Paper / Purpur / Folia.
  *
  * Build philosophy
  * ────────────────
- *  - paper-api, fastutil, PacketEvents, VaultAPI and PlaceholderAPI are
- *    `compileOnly`: they are all provided by the server or by the soft-depend
- *    plugin at runtime. Nothing is shaded, nothing is relocated, the output is
- *    a single small jar with zero duplicate classes.
+ *  - paper-api, fastutil, PacketEvents and PlaceholderAPI are `compileOnly`:
+ *    they are all provided by the server or by the soft-depend plugin at
+ *    runtime. Nothing is shaded, nothing is relocated, the output is a single
+ *    small jar with zero duplicate classes.
  *  - The Kotlin DSL + the `java` plugin is all we need. No Shadow, no
  *    run-paper, no annotation processors: fewer moving parts, faster builds.
  *  - paper-api 26.3 is compiled for Java 25, so the toolchain is 25 while the
@@ -23,14 +23,13 @@ plugins {
 
 group = "dev.stellaris"
 version = "1.0.0"
-description = "All-in-one performance and utility suite for Paper/Purpur/Folia."
+description = "Lightweight performance suite for Paper/Purpur/Folia."
 
 repositories {
     mavenCentral()
     maven("https://repo.papermc.io/repository/maven-public/") { name = "PaperMC" }
     maven("https://repo.codemc.io/repository/maven-public/") { name = "CodeMC" }
     maven("https://repo.extendedclip.com/releases/") { name = "PlaceholderAPI" }
-    maven("https://jitpack.io") { name = "JitPack" }
 }
 
 dependencies {
@@ -40,12 +39,9 @@ dependencies {
     compileOnly("it.unimi.dsi:fastutil:8.5.19")
 
     // Optional soft-dependencies. Stellaris detects them at runtime and simply
-    // leaves the related module off when they are missing.
+    // leaves the related layer off when they are missing.
     compileOnly("com.github.retrooper:packetevents-spigot:2.14.0") {
         exclude(group = "org.spigotmc", module = "spigot-api")
-    }
-    compileOnly("com.github.MilkBowl:VaultAPI:1.7.1") {
-        exclude(group = "org.bukkit", module = "bukkit")
     }
     compileOnly("me.clip:placeholderapi:2.12.3")
 }

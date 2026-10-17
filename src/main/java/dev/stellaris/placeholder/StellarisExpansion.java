@@ -1,7 +1,6 @@
 package dev.stellaris.placeholder;
 
 import dev.stellaris.Stellaris;
-import dev.stellaris.economy.EconomyManager;
 import dev.stellaris.metrics.ServerMetrics;
 import dev.stellaris.optimizer.OptimizerManager;
 import me.clip.placeholderapi.expansion.PlaceholderExpansion;
@@ -84,10 +83,6 @@ public final class StellarisExpansion extends PlaceholderExpansion {
             // ── per-player ───────────────────────────────────────────────────
             case "ping":
                 return player != null && player.isOnline() ? Integer.toString(((Player) player).getPing()) : "-1";
-            case "balance":
-                return Long.toString(balance(player));
-            case "balance_formatted":
-                return formatBalance(balance(player));
             case "world":
                 return player != null && player.isOnline() ? ((Player) player).getWorld().getName() : "";
             case "view_distance":
@@ -97,19 +92,6 @@ public final class StellarisExpansion extends PlaceholderExpansion {
             default:
                 return plugin.cfg("placeholders").bool("empty-on-unknown", true) ? "" : null;
         }
-    }
-
-    private long balance(OfflinePlayer player) {
-        if (player == null || player.getUniqueId() == null) {
-            return 0L;
-        }
-        final EconomyManager economy = plugin.modules().get("economy");
-        return economy == null ? 0L : economy.balance(player.getUniqueId());
-    }
-
-    private String formatBalance(long amount) {
-        final EconomyManager economy = plugin.modules().get("economy");
-        return economy == null ? Long.toString(amount) : economy.format(amount);
     }
 
     private static String format(double value) {

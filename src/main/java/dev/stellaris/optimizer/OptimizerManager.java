@@ -45,8 +45,9 @@ public final class OptimizerManager extends AbstractModule {
         if (cfg.child("view-distance").bool("enabled", true)) {
             services.add(new ViewDistanceTuner(plugin));
         }
+        EntityAiCuller aiCuller = null;
         if (cfg.child("entity-ai").bool("enabled", true)) {
-            services.add(new EntityAiCuller(plugin));
+            services.add(aiCuller = new EntityAiCuller(plugin));
         }
         if (cfg.child("redstone").bool("enabled", true)) {
             services.add(new RedstoneThrottler(plugin));
@@ -64,7 +65,7 @@ public final class OptimizerManager extends AbstractModule {
             services.add(new MobStacker(plugin));
         }
         if (cfg.child("packets").bool("enabled", true)) {
-            services.add(new PacketCuller(plugin));
+            services.add(new PacketCuller(plugin, aiCuller));
         }
         if (cfg.child("ram-sweeper").bool("enabled", true)) {
             services.add(new RamSweeper(plugin));
