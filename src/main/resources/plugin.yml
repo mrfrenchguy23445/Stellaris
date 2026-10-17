@@ -3,10 +3,8 @@ version: '1.0.0'
 main: dev.stellaris.Stellaris
 api-version: '1.21'
 description: 'Lightweight performance suite for Paper / Purpur / Folia: dynamic view distance, redstone & physics throttling, hopper/explosion optimisation, entity AI culling, item stacking and a RAM leak watchdog.'
-authors: [ Stellaris ]
+authors: mrfrench
 website: 'https://github.com/stellaris'
-# Stellaris only ever uses Paper's region/async schedulers, so it is safe to run
-# on Folia-based server software.
 folia-supported: true
 softdepend:
   - packetevents
