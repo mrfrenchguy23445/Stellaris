@@ -1,0 +1,184 @@
+name: Stellaris
+version: '1.0.0'
+main: dev.stellaris.Stellaris
+api-version: '1.21'
+description: 'All-in-one performance & utility suite: auto-tuner, essentials, hub, economy and placeholders in one lightweight plugin.'
+authors: [ Stellaris ]
+website: 'https://github.com/stellaris'
+# Stellaris only ever uses Paper's region/async schedulers, so it is safe to run
+# on Folia-based server software.
+folia-supported: true
+softdepend:
+  - Vault
+  - PlaceholderAPI
+  - packetevents
+
+commands:
+  stellaris:
+    description: 'Stellaris administration root command.'
+    aliases: [ st, stell ]
+    usage: '/stellaris <reload|info|modules|optimize|profile>'
+  spawn:
+    description: 'Teleport to the server spawn.'
+    usage: '/spawn'
+  setspawn:
+    description: 'Set the server spawn.'
+    usage: '/setspawn'
+  tp:
+    description: 'Teleport a player to another player or location.'
+    usage: '/tp <player> [target]'
+  tpa:
+    description: 'Request a teleport to another player.'
+    usage: '/tpa <player>'
+  tpaccept:
+    description: 'Accept a pending teleport request.'
+    aliases: [ tpac, tpyes ]
+    usage: '/tpaccept [player]'
+  tpdeny:
+    description: 'Deny a pending teleport request.'
+    aliases: [ tpno ]
+    usage: '/tpdeny [player]'
+  warp:
+    description: 'Teleport to a warp.'
+    usage: '/warp <name> [player]'
+  setwarp:
+    description: 'Create or replace a warp.'
+    usage: '/setwarp <name>'
+  delwarp:
+    description: 'Delete a warp.'
+    aliases: [ delwarp ]
+    usage: '/delwarp <name>'
+  warps:
+    description: 'List the available warps.'
+    usage: '/warps'
+  back:
+    description: 'Return to your previous location.'
+    usage: '/back'
+  ban:
+    description: 'Ban a player.'
+    usage: '/ban <player> [reason]'
+  unban:
+    description: 'Lift a ban.'
+    aliases: [ pardon ]
+    usage: '/unban <player>'
+  mute:
+    description: 'Mute a player.'
+    usage: '/mute <player> [duration] [reason]'
+  unmute:
+    description: 'Unmute a player.'
+    usage: '/unmute <player>'
+  kick:
+    description: 'Kick a player.'
+    usage: '/kick <player> [reason]'
+  warn:
+    description: 'Warn a player.'
+    usage: '/warn <player> <reason>'
+  freeze:
+    description: 'Freeze or unfreeze a player.'
+    usage: '/freeze <player>'
+  vanish:
+    description: 'Toggle vanish.'
+    aliases: [ v ]
+    usage: '/vanish [player]'
+  staffchat:
+    description: 'Send a message to staff only.'
+    aliases: [ sc ]
+    usage: '/staffchat <message>'
+  balance:
+    description: 'Show your balance.'
+    aliases: [ bal, money, eco ]
+    usage: '/balance [player]'
+  pay:
+    description: 'Send money to another player.'
+    usage: '/pay <player> <amount>'
+  baltop:
+    description: 'Show the richest players.'
+    aliases: [ moneytop, balancetop ]
+    usage: '/baltop [page]'
+  hologram:
+    description: 'Manage Stellaris holograms.'
+    aliases: [ holo, hl ]
+    usage: '/hologram <create|remove|move|list|reload>'
+
+permissions:
+  stellaris.admin:
+    description: 'Grants every Stellaris permission.'
+    default: op
+    children:
+      stellaris.reload: true
+      stellaris.command.spawn: true
+      stellaris.command.setspawn: true
+      stellaris.command.tp: true
+      stellaris.command.tpa: true
+      stellaris.command.warp: true
+      stellaris.command.warp.manage: true
+      stellaris.command.back: true
+      stellaris.moderate.ban: true
+      stellaris.moderate.mute: true
+      stellaris.moderate.kick: true
+      stellaris.moderate.warn: true
+      stellaris.moderate.freeze: true
+      stellaris.vanish: true
+      stellaris.staffchat: true
+      stellaris.economy.admin: true
+      stellaris.hologram.manage: true
+  stellaris.reload:
+    description: 'Reload the Stellaris configuration.'
+    default: op
+  stellaris.command.spawn:
+    description: 'Use /spawn.'
+    default: true
+  stellaris.command.setspawn:
+    description: 'Use /setspawn.'
+    default: op
+  stellaris.command.tp:
+    description: 'Use /tp.'
+    default: op
+  stellaris.command.tpa:
+    description: 'Use /tpa, /tpaccept and /tpdeny.'
+    default: true
+  stellaris.command.warp:
+    description: 'Use /warp and /warps.'
+    default: true
+  stellaris.command.warp.manage:
+    description: 'Create and delete warps.'
+    default: op
+  stellaris.command.back:
+    description: 'Use /back.'
+    default: true
+  stellaris.moderate.ban:
+    description: 'Ban and unban players.'
+    default: op
+  stellaris.moderate.mute:
+    description: 'Mute and unmute players.'
+    default: op
+  stellaris.moderate.kick:
+    description: 'Kick players.'
+    default: op
+  stellaris.moderate.warn:
+    description: 'Warn players.'
+    default: op
+  stellaris.moderate.freeze:
+    description: 'Freeze players.'
+    default: op
+  stellaris.vanish:
+    description: 'Vanish and see vanished players.'
+    default: op
+  stellaris.staffchat:
+    description: 'Use the staff chat.'
+    default: op
+  stellaris.economy.user:
+    description: 'Use the economy commands.'
+    default: true
+  stellaris.economy.admin:
+    description: 'Manage other players\' balances.'
+    default: op
+  stellaris.hologram.manage:
+    description: 'Create, move and remove holograms.'
+    default: op
+  stellaris.bypass.spam:
+    description: 'Bypass chat filters and cooldowns.'
+    default: op
+  stellaris.bypass.teleport:
+    description: 'Bypass teleport warmups and cooldowns.'
+    default: op

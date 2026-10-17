@@ -1,0 +1,576 @@
+# ══════════════════════════════════════════════════════════════════════════════
+#                              S T E L L A R I S
+#         All-in-one performance & utility suite for Paper / Purpur / Folia
+# ══════════════════════════════════════════════════════════════════════════════
+#
+#  DESIGN CONTRACT — read this once, it explains the whole file
+#  ───────────────────────────────────────────────────────────
+#  1. Every feature group has a master switch in `modules:`. Setting a switch
+#     to false means Stellaris never even instantiates that module: no listener
+#     is registered, no task is scheduled, no cache is allocated. A disabled
+#     feature costs exactly 0% CPU and 0 bytes of retained memory.
+#  2. Time is expressed in server ticks (20 ticks = 1 second) unless the key
+#     name ends in `-seconds` or `-ms`.
+#  3. All "soft" throttles (redstone, hoppers, explosions) are driven by the
+#     single lag detector below, so the server is measured once instead of five
+#     times. Throttling only ever engages while the server is already lagging.
+#  4. Safe defaults: on a healthy server Stellaris does nothing except a
+#     few extra instructions per relevant event.
+#  5. Apply changes at runtime with `/stellaris reload`. Keys that resize a
+#     pool or open a database are marked RESTART.
+#
+config-version: 1
+
+# Extra console output while tuning. Leave off in production: every debug line
+# is allocation you don't need.
+debug: false
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  MASTER MODULE SWITCHES
+# ──────────────────────────────────────────────────────────────────────────────
+modules:
+  optimizer: true       # TPS auto-tuner, redstone/hopper/explosion/RAM/packet layers
+  core: true            # spawn, warps, /tp, /tpa, /back, safe teleports
+  chat: true            # MiniMessage formatting, anti-spam, caps/link filters
+  moderation: true      # ban, mute, kick, warn, freeze, vanish, staff chat
+  hub: true             # double-jump, launchpads, void rescue, visibility, join/quit
+  economy: true         # Vault-compatible economy + GUI engine
+  holograms: true       # TextDisplay hologram engine
+  placeholders: true    # %stellaris_*% PlaceholderAPI expansion
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  1. OPTIMIZER — the auto-tuner
+# ══════════════════════════════════════════════════════════════════════════════
+optimizer:
+
+  # ── Global lag detector ────────────────────────────────────────────────────
+  # One repeating task (1 tick) keeps a rolling MSPT/TPS window. Every other
+  # optimizer sub-module reads a single boolean from it instead of measuring
+  # the server on its own.
+  lag-detector:
+    enabled: true
+    # If the TPS falls below this, the server is considered "under load" and
+    # redstone/hopper/explosion throttles become active.
+    tps-threshold: 18.5
+    # Anti-flapping: consecutive bad samples required to start throttling, and
+    # consecutive good samples required to stop. Prevents 1-tick hiccups from
+    # toggling every subsystem.
+    samples-before-throttle: 3
+    samples-before-recovery: 5
+
+  # ── Dynamic view & simulation distance ─────────────────────────────────────
+  view-distance:
+    enabled: true
+    interval-seconds: 10
+    worlds: []                  # empty = all worlds
+    min-view-distance: 4
+    max-view-distance: 12
+    min-simulation-distance: 4
+    max-simulation-distance: 10
+    # Baseline distance is reduced by this much per online player, so large
+    # servers are automatically cheaper than small ones.
+    player-penalty: 0.05
+    manual-baseline: -1         # > 0 overrides the player-based baseline
+    step: 1                     # chunks added/removed per adjustment
+    cooldown-seconds: 30        # minimum delay between two changes per world
+    lag-reduction: 2            # Distance to drop while lagging
+    # Per-player distances (Paper): lets a 300 ms player keep view distance
+    # while a 30 ms player is trimmed. Off by default; it is a per-tick client
+    # setting and the world value already covers 95% of the benefit.
+    per-player: false
+    # Restore the pre-Stellaris values when the module is disabled/reloaded.
+    restore-on-disable: true
+
+  # ── Redstone & physics throttler ───────────────────────────────────────────
+  # Only engages below the lag threshold. Budgets are per chunk and generous
+  # enough that ordinary farms (observers, comparators) never notice.
+  redstone:
+    enabled: true
+    # Redstone power updates allowed per chunk per second.
+    updates-per-second-per-chunk: 4000
+    # Hard ceiling on the first tick after a throttle window opens, so a huge
+    # dust line cannot burst through the whole budget at once.
+    burst-limit: 400
+    physics:
+      enabled: true
+      # BlockPhysicsEvent budget per chunk per second while lagging. Keep this
+      # well above redstone: it also covers sand/gravel and crops.
+      updates-per-second-per-chunk: 6000
+      burst-limit: 600
+      # Physics for these materials is never cancelled (farms & player safety).
+      exempt-materials:
+        - WATER
+        - LAVA
+        - SAND
+        - GRAVEL
+        - ANVIL
+    # How often idle chunk budgets are swept out of RAM.
+    prune-interval-seconds: 60
+
+  # ── Hopper & item transport optimizer ─────────────────────────────────────
+  hoppers:
+    enabled: true
+    # When a hopper tries to push into a destination that the cache knows is
+    # full, the event is cancelled and the hopper's transfer cooldown is
+    # pushed out instead of letting vanilla rescan the whole inventory.
+    full-destination-shortcut: true
+    cooldown-when-full-ticks: 8
+    # Throttle hoppers that have not moved an item for a while by raising their
+    # transfer cooldown. Scanned in the background, a few chunks per tick.
+    idle-throttle:
+      enabled: false
+      idle-seconds: 60
+      cooldown-ticks: 20
+      chunks-per-tick: 4
+    # Upper bound for the destination capacity cache. Oldest entries are
+    # dropped first; the cache never grows without limit (leak safety).
+    cache-size: 4096
+
+  # ── Explosion & TNT optimizer ──────────────────────────────────────────────
+  explosions:
+    enabled: true
+    # Only applies the per-tick explosion cap while the lag detector is active.
+    only-when-lagging: true
+    max-explosions-per-tick: 40
+    # 0 = unlimited. Anything above this is trimmed from the block list, which
+    # caps the worst-case cost of a single blast.
+    max-blocks-per-explosion: 0
+    # Multiplies vanilla explosion drops (1.0 = vanilla).
+    yield-multiplier: 1.0
+
+  # ── Smart entity AI culling ────────────────────────────────────────────────
+  # Disables mob AI for mobs that no player can currently see, and re-enables
+  # it the moment a player comes close. This is the single biggest mob-CPU win
+  # on survival servers and it never affects mobs near players.
+  entity-ai:
+    enabled: true
+    interval-seconds: 3
+    # AI is switched off beyond this distance from the nearest player.
+    disable-distance: 48
+    # ...and switched back on inside this distance (hysteresis, avoids packet spam).
+    reenable-distance: 40
+    # Mobs in enclosed (no sky light) spaces go to sleep even if a player is
+    # nearby, as long as that player is farther than this distance.
+    enclosed-space:
+      enabled: true
+      distance: 24
+    # Never touch these: smart mobs and anything with an owner/name/tag.
+    ignore-tamed: true
+    ignore-leashed: true
+    ignore-named: true
+    ignore-in-vehicle: true
+    ignore-types:
+      - ENDER_DRAGON
+      - WITHER
+      - WARDEN
+      - ELDER_GUARDIAN
+
+  # ── Mob stacking ───────────────────────────────────────────────────────────
+  # Merges identical, unmodified farm mobs into a single carrier entity that
+  # remembers the stack size in its PersistentDataContainer. Breeding, dyeing,
+  # shearing and taming are preserved: only mobs that are byte-for-byte
+  # identical (type, age, variant, profession, colour, equipment, no name, not
+  # tamed, not leashed, not in love) are ever merged.
+  mob-stacking:
+    enabled: false
+    interval-seconds: 5
+    merge-radius: 6.0
+    max-stack-size: 64
+    # Show "<count>x <mob>" above the carrier.
+    show-stacked-name: true
+    # Mobs handed back when a player right-clicks the stack.
+    unstack-per-click: 16
+    # If the carrier dies in a fight, the remaining mobs are released.
+    split-on-death: true
+    # Empty = every mob is a candidate; fill in to restrict stacking.
+    whitelist: []
+    blacklist:
+      - VILLAGER
+      - WANDERING_TRADER
+      - IRON_GOLEM
+      - SNOW_GOLEM
+      - ALLAY
+
+  # ── Ground item stacking ───────────────────────────────────────────────────
+  item-stacking:
+    enabled: true
+    # Vanilla merge radius multiplier. 1.0 = leave vanilla alone.
+    merge-radius-multiplier: 2.0
+    # Pile size limit (conceptual) for mob pickup behavior.
+    # hopper/hopper-minecart farms from strobing.
+    max-pile-size: 32
+    # Restore the merge radius when disabled.
+    restore-on-disable: true
+
+  # ── RAM sweeper & leak watchdog ────────────────────────────────────────────
+  ram-sweeper:
+    enabled: true
+    interval-seconds: 60
+    # Ask JVM for a GC hint when heap usage exceeds this percentage. Off by
+    # default: the JVM's own collector is smarter than a plugin timer. Only
+    # enable on tiny VPS instances with no G1 tuning.
+    gc-hint-above-percent: -1
+    # Ask every module to drop its trimmable caches (map entries that have
+    # expired, per-player scratch state, ...). Cheap and always safe.
+    trim-caches: true
+    # Unload chunks that no player is near and that hold no entities. Runs on
+    # each world's region thread and is rate limited.
+    chunk-sweep:
+      enabled: false
+      keep-radius: 6
+      chunks-per-world-per-run: 64
+    # Warn in console when a tracked collection keeps growing. This is how you
+    # find the leak before the OOM killer does.
+    leak-watchdog:
+      enabled: true
+      warn-above-entries: 20000
+      samples-before-warning: 3
+
+  # ── Packet layer (requires PacketEvents) ───────────────────────────────────
+  packets:
+    enabled: true
+    # Per-player budget for particle packets, refilled every second. Big farms
+    # and explosive fights emit thousands per second; the surplus is dropped
+    # before it ever reaches the network stack.
+    particle-budget-per-second: 400
+    # Drop particle packets whose source is farther than this from the player.
+    max-particle-distance: 32
+    # Coalesce entity metadata bursts for mobs that are AI-culled anyway.
+    skip-metadata-for-ai-disabled: true
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  2. CORE — essentials, teleports and warps
+# ══════════════════════════════════════════════════════════════════════════════
+core:
+  # Cancellable warmup before a teleport lands. Warmup is skipped for players
+  # with stellaris.bypass.teleport.
+  teleport:
+    warmup-seconds: 3
+    cooldown-seconds: 2
+    cancel-on-move: true
+    cancel-on-damage: true
+    # Play the classic ender-pearl sweep while warming up.
+    warmup-sound: ENTITY_ENDERMAN_TELEPORT
+    # How far up/down a "safe" landing spot is searched for.
+    safe-location-search-radius: 3
+    # Refuse to teleport into these; the search walks up until it finds air.
+    unsafe-materials:
+      - LAVA
+      - FIRE
+      - CACTUS
+      - MAGMA_BLOCK
+      - CAMPFIRE
+      - SWEET_BERRY_BUSH
+      - POWDER_SNOW
+  spawn:
+    enabled: true
+    # World/name is written by /setspawn; do not edit by hand unless you know
+    # the format. Leave world empty to fall back to the server's main world.
+    world: ''
+    x: 0.0
+    y: 64.0
+    z: 0.0
+    yaw: 0.0
+    pitch: 0.0
+    # Teleport players here on join (after data load) and on /spawn.
+    on-join: true
+    # Spawn radius used by respawn handling; -1 disables respawn override.
+    respawn-at-spawn: true
+  tpa:
+    enabled: true
+    # A request expires after this long.
+    request-timeout-seconds: 60
+    max-pending-requests: 3
+    # Refuse requests when either side is in combat (needs hub.combat-tag).
+    block-in-combat: false
+  back:
+    enabled: true
+    # Remember the last death location as well as the last teleport.
+    store-death-location: true
+  warps:
+    enabled: true
+    # Permission format: stellaris.warp.<name>. Leave use-permissions off to
+    # let every player use every warp.
+    use-permissions: false
+    per-warp-cooldown-seconds: 0
+    # Per-warp icon for the /warps GUI (Material name).
+    default-icon: COMPASS
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  3. CHAT
+# ══════════════════════════════════════════════════════════════════════════════
+chat:
+  enabled: true
+  # ── Formatting (MiniMessage) ───────────────────────────────────────────────
+  format: '<gray>[<gradient:#7dd3fc:#818cf8>Chat</gradient>]</gray> <white><player></white> <dark_gray>»</dark_gray> <message>'
+  # Placeholders available here: <player>, <display_name>, <world>, <prefix>,
+  # <suffix>, <message>. PAPI placeholders work if PlaceholderAPI is installed.
+  format-worlds: {}
+    # example_world: '<world> <player> <gray>»</gray> <message>'
+  # ── Anti-spam ──────────────────────────────────────────────────────────────
+  anti-spam:
+    enabled: true
+    # Milliseconds between two messages from the same player.
+    interval-ms: 500
+    # Identical (or near identical) message lockout.
+    duplicate-window-seconds: 10
+    # Maximum messages allowed inside the window before a kick/warn. Set
+    # action to WARN, MUTE or KICK.
+    flood-max-messages: 8
+    flood-window-seconds: 4
+    flood-action: WARN
+  # ── Filters ────────────────────────────────────────────────────────────────
+  caps:
+    enabled: true
+    # Percentage of letters that must be uppercase before the message is folded.
+    max-percent: 60
+    min-length: 8
+  links:
+    enabled: true
+    # Whitelisted domains are always allowed.
+    whitelist:
+      - youtube.com
+      - youtu.be
+      - twitch.tv
+      - imgur.com
+    # Replace blocked links with this.
+    replacement: '<red>[link removed]</red>'
+  # ── Command cooldowns ──────────────────────────────────────────────────────
+  command-cooldowns:
+    enabled: true
+    cooldown-ms: 750
+    # Commands that are never rate limited.
+    exempt:
+      - msg
+      - r
+      - tell
+  # ── Small niceties ─────────────────────────────────────────────────────────
+  join-leave:
+    enabled: true
+    join-message: '<green>+</green> <white><player></white>'
+    quit-message: '<red>-</red> <white><player></white>'
+    first-join-message: '<gold>Welcome to the server, <player>!</gold>'
+    send-to-console: true
+  actionbar:
+    enabled: true
+    interval-ticks: 40
+    text: '<gray>TPS <white><tps></white> <dark_gray>|</dark_gray> <gray>Ping <white><ping>ms</white> <dark_gray>|</dark_gray> <gray>Balance <white><balance></white>'
+    # Only show the actionbar in these worlds; empty = everywhere.
+    worlds: []
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  4. MODERATION
+# ══════════════════════════════════════════════════════════════════════════════
+moderation:
+  enabled: true
+  # Staff chat uses MiniMessage too.
+  staff-chat:
+    enabled: true
+    format: '<dark_aqua>[SC]</dark_aqua> <white><player></white> <dark_gray>»</dark_gray> <aqua><message></aqua>'
+    # Also mirror staff chat into this world's console; empty = server console.
+    console: true
+  # Vanish hides the player from everyone without stellaris.vanish and removes
+  # them from the tab list.
+  vanish:
+    enabled: true
+    # Emit fake join/quit messages so vanish is not visible in chat.
+    fake-messages: true
+    join-message: '<yellow><player> joined the game</yellow>'
+    quit-message: '<yellow><player> left the game</yellow>'
+    # Keep vanished players out of mob targeting and player list.
+    hide-from-tab: true
+  # Freeze blocks movement, damage and interaction until unfrozen.
+  freeze:
+    enabled: true
+    message: '<aqua>You have been frozen by staff.</aqua>'
+    # Teleport the player back if they somehow move more than this far.
+    max-drift: 0.5
+  # Warnings are stored per player and can be reviewed with /warn.
+  warnings:
+    enabled: true
+    # Auto-punish at these thresholds: <count>: <command without slash>.
+    thresholds:
+      3: 'mute <player> 1h Repeated warnings'
+      5: 'ban <player> 1d Too many warnings'
+  # Default durations when none is supplied (formats: 30s, 10m, 2h, 7d, perm).
+  defaults:
+    ban-duration: perm
+    mute-duration: 1h
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  5. HUB
+# ══════════════════════════════════════════════════════════════════════════════
+hub:
+  enabled: true
+  # World names that count as the lobby. Hub features only apply there, which
+  # is what you want in a network lobby sitting next to survival worlds.
+  worlds:
+    - world
+  # ── Double jump ────────────────────────────────────────────────────────────
+  double-jump:
+    enabled: true
+    # Y velocity applied on the second jump.
+    power: 1.2
+    # Extra horizontal boost applied in the direction the player is facing.
+    forward-boost: 0.6
+    sound: ENTITY_BAT_TAKE_OFF
+    particle: CLOUD
+  # ── Launchpads ─────────────────────────────────────────────────────────────
+  launchpads:
+    enabled: true
+    # A launchpad is a pressure plate of this material inside the hub worlds.
+    material: LIGHT_WEIGHTED_PRESSURE_PLATE
+    power: 2.5
+    cooldown-ms: 1000
+    sound: ENTITY_FIREWORK_ROCKET_LAUNCH
+  # ── Void rescue ────────────────────────────────────────────────────────────
+  void:
+    enabled: true
+    # Below this Y in the hub worlds the player is rescued (teleported back to
+    # spawn) instead of dying.
+    rescue-y: 0
+    message: '<gray>Whoops! Let us get you back to safety.</gray>'
+  # ── Player visibility toggle ───────────────────────────────────────────────
+  visibility:
+    enabled: true
+    # Players can hide/show everyone else; the setting is remembered per player.
+    persist: true
+  # ── Speed boost ────────────────────────────────────────────────────────────
+  speed:
+    enabled: true
+    # Walk speed multiplier inside the hub worlds (0.2 = vanilla).
+    walk-speed: 0.3
+    fly-speed: 0.15
+  # ── Player state ───────────────────────────────────────────────────────────
+  player-state:
+    # Clear inventory, XP and hunger on join in hub worlds, and restore the
+    # survival inventory when they leave. Requires the network storage mode.
+    enabled: false
+    restore-on-leave: true
+    clear-inventory: true
+    clear-xp: true
+    full-health: true
+    feed: true
+  # ── Combat tag (used by tpa.block-in-combat and teleport warmups) ──────────
+  combat-tag:
+    enabled: true
+    duration-seconds: 15
+    block-commands:
+      - spawn
+      - warp
+      - tpa
+      - back
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  6. ECONOMY & GUI
+# ══════════════════════════════════════════════════════════════════════════════
+economy:
+  enabled: true
+  # Currency display. Amounts are stored as a long (no doubles, no rounding
+  # drift, no BigDecimal allocation).
+  currency:
+    singular: 'credit'
+    plural: 'credits'
+    symbol: '$'
+    # Abbreviate huge balances in /baltop and the actionbar (1.2M, 45.3K).
+    abbreviate: true
+    # Starting balance for brand new players.
+    starting-balance: 100
+  # Maximum balance a single account may hold.
+  max-balance: 1000000000000
+  # /pay
+  pay:
+    enabled: true
+    minimum: 1
+    # Percentage of the sent amount that is destroyed as a fee (0 = none).
+    tax-percent: 0.0
+  # /baltop is served from a cache rebuilt asynchronously.
+  baltop:
+    enabled: true
+    entries: 10
+    # How often the cache is rebuilt (async, never blocks the main thread).
+    refresh-seconds: 60
+  # Vault integration: becomes the server's economy provider when Vault is
+  # installed, with no per-transaction plugin lookup overhead.
+  vault: true
+  # ── GUI engine ─────────────────────────────────────────────────────────────
+  gui:
+    enabled: true
+    # Minimal time between two clicks on the same inventory. The duplicate-item
+    # exploit needs sub-millisecond clicks, so this is a hard, cheap guard.
+    click-throttle-ms: 150
+    # Cancel drag events entirely (drag dupes are always exploits).
+    cancel-drags: true
+    # Sound played on every GUI click (empty = silent).
+    click-sound: UI_BUTTON_CLICK
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  7. STORAGE  (used by economy, warps, moderation and hub player state)
+# ══════════════════════════════════════════════════════════════════════════════
+storage:
+  # YAML | SQLITE | MYSQL   (RESTART required to change)
+  #   YAML   : zero setup, one file per profile, fine up to ~200 players.
+  #   SQLITE : single embedded file, best all-round default.
+  #   MYSQL  : networks and multi-server setups.
+  backend: SQLITE
+  sqlite:
+    file: 'stellaris.db'
+  mysql:
+    host: '127.0.0.1'
+    port: 3306
+    database: 'stellaris'
+    username: 'root'
+    password: ''
+    # Appended verbatim to the JDBC URL.
+    properties: 'useSSL=false&characterEncoding=utf8&rewriteBatchedStatements=true'
+    # Connections in the pool (RESTART).
+    pool-size: 4
+  # Profiles kept in RAM. Evicting a profile flushes it asynchronously first.
+  cache-size: 1000
+  # Dirty profiles are written in batches every N ticks.
+  flush-interval-ticks: 200
+  # Never let a profile stay dirty for longer than this before forcing a write.
+  max-dirty-seconds: 60
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  8. HOLOGRAMS
+# ══════════════════════════════════════════════════════════════════════════════
+holograms:
+  enabled: true
+  # TextDisplay entities are real entities: they follow the world, respect
+  # view distance and cost nothing when out of range (unlike packet-based
+  # holograms that must be resent per viewer).
+  backend: TEXT_DISPLAY      # TEXT_DISPLAY | PACKETS (needs PacketEvents)
+  line-spacing: 0.28
+  billboard: CENTER          # CENTER | FIXED | VERTICAL | HORIZONTAL
+  see-through: false
+  shadowed: true
+  background-opacity: 0      # 0-255, 0 = transparent
+  # Placeholder refresh. Placeholders are resolved once per interval for every
+  # hologram, never per tick.
+  refresh-ticks: 20
+  # Do not spawn holograms for players beyond this distance.
+  view-range: 48.0
+  default-lines:
+    - '<gradient:#7dd3fc:#818cf8><bold>Stellaris</bold></gradient>'
+    - '<gray>Edit me in <white>/hologram</white>'
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  9. PLACEHOLDERS  (%stellaris_...%)
+# ══════════════════════════════════════════════════════════════════════════════
+placeholders:
+  enabled: true
+  # Replace unknown placeholders with an empty string instead of the raw tag.
+  empty-on-unknown: true
+  # Expose the spark-style profiler placeholder (%stellaris_tps%), even when
+  # the optimizer module is disabled (the metrics sampler still runs).
+  expose-metrics-when-idle: true
